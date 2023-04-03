@@ -87,6 +87,7 @@ void minecraft::player::readChat(){
     login("<" + username + "> " + m);
     if(m == "/stats"){
         writeChat("freeheap: " + String(esp_get_free_heap_size() / 1000) + "kB", "Server");
+        heap_caps_print_heap_info(MALLOC_CAP_DEFAULT);
     } else if (m == "/on") {
         digitalWrite(26, HIGH);
         mc->broadcastChatMessage("Turned LED on", "LED");
@@ -432,8 +433,8 @@ void minecraft::broadcastEntityDestroy(uint8_t id){
 
 void minecraft::broadcastPlayerInfo(){
     // calculate data length in a horrible non-automated way for now TODO
-    uint32_t num = getPlayerNum();
-    uint32_t len = 3 + (21 * num);
+    uint8_t num = getPlayerNum();
+    uint16_t len = 3 + (21 * num);
     for(auto player : players){
         if(player.connected){
             len += player.username.length();

@@ -78,10 +78,9 @@ void setup() {
 }
 
 void loop(){
-    uint8_t i;
     //check if there are any new clients
     if (server.hasClient()){
-        for(i = 0; i < MAX_PLAYERS; i++){
+        for(uint8_t i = 0; i < MAX_PLAYERS; i++){
             //find free/disconnected spot
             if (!serverClients[i].socket || !serverClients[i].socket.connected()){
                 if(serverClients[i].socket) serverClients[i].socket.stop();
