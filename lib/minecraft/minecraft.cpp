@@ -140,12 +140,60 @@ void minecraft::player::readClickWindow(){
 
 }
 
-// TODO: Do this
-/*
 void minecraft::player::readInteractEntity(){
-    int8_t windowID = readByte();
+    uint8_t entityID = readVarInt();
+    uint8_t action = readVarInt();
+    if (action == 3) {
+        float x = readFloat();
+        float y = readFloat();
+        float z = readFloat();
+    }
+    if (action != 1) {
+        uint8_t hand = readVarInt();
+    }
+    bool sneaking = readBool();
+
+    if (action != 1) {  // no need to do any processing, we don't care about other actions
+        return;
+    }
+
+    player* targetPlayer = &mc->players[entityID];
+
+
+    double targetX = targetPlayer->x;
+    double targetY = targetPlayer->y;
+    double targetZ = targetPlayer->z;
+
+    double xDiff = targetX - x;
+    double yDiff = targetY - y;
+    double zDiff = targetZ - z;
+
+    double distance = sqrt(xDiff + yDiff + zDiff);
+
+    float strengthMultiplier = 2500;
+    float upVelocity = 3000;
+
+    short xVelocity = xDiff * strengthMultiplier;
+    short yVelocity = (yDiff * strengthMultiplier) + upVelocity;
+    short zVelocity = zDiff * strengthMultiplier;
+
+    if (distance > 4) {
+        mc->broadcastChatMessage("he's hacking!!!", "Server");
+        return;
+    }
+
+    mc->broadcastEntityAnimation(1, entityID); // do damage tick animation
+    targetPlayer->health -= 1;
+    targetPlayer->writeHealth();
+
+    packet p(targetPlayer->S, targetPlayer->mtx);
+    p.writeVarInt(0x46);
+    p.writeVarInt(targetPlayer->id);
+    p.writeShort(xVelocity);
+    p.writeShort(yVelocity);
+    p.writeShort(zVelocity);
+    p.writePacket();
 }
-*/
 
 void minecraft::player::readPosition(){
     x = readDouble();
@@ -218,7 +266,14 @@ void minecraft::player::readHeldItem(){
 }
 
 void minecraft::player::readAnimation(){
-    mc->broadcastEntityAnimation(readVarInt(), id);  
+    uint8_t hand = readVarInt();
+    uint8_t animID;
+    if (hand) {
+        animID = 3;
+    } else {
+        animID = 0;
+    }
+    mc->broadcastEntityAnimation(animID, id, false);  
 }
 
 void minecraft::player::readAction(){
@@ -407,9 +462,9 @@ void minecraft::broadcastPlayerRotation(int _yaw_i, int _pitch_i, bool on_ground
     }
 }
 
-void minecraft::broadcastEntityAnimation(uint8_t anim, uint8_t id){
+void minecraft::broadcastEntityAnimation(uint8_t anim, uint8_t id, bool sendToSelf){
     for(auto player : players){
-        if(player.connected && player.id != id){
+        if(player.connected && (player.id != id || sendToSelf)){
             player.writeEntityAnimation(anim, id);
         }
     }
@@ -433,13 +488,7 @@ void minecraft::broadcastEntityDestroy(uint8_t id){
 
 void minecraft::broadcastPlayerInfo(){
     // calculate data length in a horrible non-automated way for now TODO
-    uint8_t num = getPlayerNum();
-    uint16_t len = 3 + (21 * num);
-    for(auto player : players){
-        if(player.connected){
-            len += player.username.length();
-        }
-    }
+    uint32_t num = getPlayerNum();
     // broadcast playerinfo
     for(auto player : players){
         if(player.connected){
@@ -698,14 +747,7 @@ void minecraft::player::writeEntityAnimation(uint8_t anim, uint8_t id){
     packet p(S, mtx);
     p.writeVarInt(0x05); // packet id
     p.writeVarInt(id);
-    switch(anim){
-        case 0:
-            p.writeByte(0);
-            break;
-        case 1:
-            p.writeByte(3);
-            break;
-    }
+    p.writeByte(anim);
     p.writePacket();
 }
 
@@ -1037,7 +1079,7 @@ void minecraft::player::handle(){
             readClickWindow();
             break;
         case 0x0E:
-            //readInteractEntity();
+            readInteractEntity();
             break;
         case 0x12:
             readPosition();
