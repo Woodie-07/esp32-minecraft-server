@@ -1036,7 +1036,7 @@ void minecraft::player::handle(){
             readClickWindow();
             break;
         case 0x0E:
-            readInteractEntity();
+            //readInteractEntity();
             break;
         case 0x12:
             readPosition();
