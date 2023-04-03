@@ -299,9 +299,8 @@ void minecraft::player::readBlockPlacement(){
             blockX++;
             break;
     }
-
-    if (blockY < 0) return;
-    if (blockX < 0 || blockZ < 0) return;
+    
+    if (blockY < 0 || blockX < 0 || blockZ < 0) return;
 
     int8_t chunkX = blockX / 16;
     int8_t chunkZ = blockZ / 16;
