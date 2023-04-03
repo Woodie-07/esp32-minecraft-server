@@ -38,12 +38,13 @@ uint8_t minecraft::player::readHandShake(){
     readString(); // we don't need our name
     readUnsignedShort();
     int state = readVarInt();
-    if(id != 0){
+    /* if(id != 0){
         return false;
     } else if(protocol_version != 754){
         logerr("wrong protocol version, log in with 1.16.5");
         return false;
-    }
+    } */
+    // lol, just take a gamble ezpz
 
     if(state != 1 && state != 2) {
         logerr("wrong state");
@@ -60,7 +61,7 @@ bool minecraft::player::readLoginStart(){
         return false;
     }
     username = readString();
-    loginfo("player logging in as " + username);
+    loginfo("Login: " + username);
     return true;
 }
 
@@ -69,7 +70,7 @@ uint64_t minecraft::player::readPing(){
     readVarInt(); // length
     readVarInt(); // packet id
     uint64_t payload = readLong(); // payload
-    login("ping " + String((uint32_t)payload));
+    login("Ping: " + String((uint32_t)payload));
     return payload;
 }
 
@@ -77,7 +78,7 @@ void minecraft::player::readRequest(){
     while(S->available() < 2);
     readVarInt();
     readVarInt();
-    login("request packet received");
+    login("Request packet received");
 }
 
 // SERVERBOUND PLAY PACKETS
@@ -85,7 +86,7 @@ void minecraft::player::readChat(){
     String m = readString();
     login("<" + username + "> " + m);
     if(m == "/stats"){
-        writeChat("freeheap: " + String(esp_get_free_heap_size() / 1000) + "kB", "server");
+        writeChat("freeheap: " + String(esp_get_free_heap_size() / 1000) + "kB", "Server");
     } else if (m == "/on") {
         digitalWrite(26, HIGH);
         mc->broadcastChatMessage("Turned LED on", "LED");
@@ -138,9 +139,12 @@ void minecraft::player::readClickWindow(){
 
 }
 
+// TODO: Do this
+/*
 void minecraft::player::readInteractEntity(){
     int8_t windowID = readByte();
 }
+*/
 
 void minecraft::player::readPosition(){
     x = readDouble();
@@ -299,15 +303,15 @@ void minecraft::player::readBlockPlacement(){
             blockX++;
             break;
     }
-    
-    if (blockY < 0 || blockX < 0 || blockZ < 0) return;
+
+    if (blockX < 0 || blockY < 0 || blockZ < 0) return;
 
     int8_t chunkX = blockX / 16;
     int8_t chunkZ = blockZ / 16;
 
-    //if (chunkX > 1 || chunkZ > 1 || chunkX < 0 || chunkZ < 0) {
-    //    return;
-    //}
+    if (chunkX > 1 || chunkZ > 1 || chunkX < 0 || chunkZ < 0) {
+        return;
+    }
 
 
     uint8_t slotPlacedFrom;
@@ -351,8 +355,7 @@ void minecraft::player::readBlockPlacement(){
 
     chunk[chunkX][chunkZ][blockY][chunkBlockZ][chunkBlockArrayX] = blockPlaced;
 
-    //mc->broadcastChunk(chunkX, chunkZ, id);
-    mc->broadcastChunk(chunkX, chunkZ, 255);
+    mc->broadcastChunk(chunkX, chunkZ, id);
 }
 
 void minecraft::broadcastChunk(int8_t chunkX, int8_t chunkZ, uint8_t idToNotSendTo) {
@@ -454,7 +457,7 @@ void minecraft::broadcastPlayerInfo(){
                 }
             }
             pac.writePacket();
-            player.login("player info sent");
+            player.login("Sent player info");
         }
     }
 }
@@ -487,24 +490,27 @@ void minecraft::player::writeLoginSuccess(){
     logout("login success sent");
 }
 
-void minecraft::player::writeChunk(uint8_t x, uint8_t y){
+void minecraft::player::writeFreeHeap() {
     loginfo("Free heap: " + String(esp_get_free_heap_size() / 1000) + " KB");
+}
+
+void minecraft::player::writeChunk(uint8_t x, uint8_t y){
+    writeFreeHeap();
     packet p(S, mtx);
     p.writeVarInt(0x20); 
     p.writeInt(x); // X
     p.writeInt(y); // Z
     p.writeBoolean(1); // full chunk yes
     p.writeVarInt(0x01); //bitmask set to 0xFF because we're sending the whole chunk
-    loginfo("Free heap: " + String(esp_get_free_heap_size() / 1000) + " KB");
+    writeFreeHeap();
 
     p.write(height_map_NBT, sizeof(height_map_NBT) / sizeof(height_map_NBT[0]));
-    loginfo("Free heap: " + String(esp_get_free_heap_size() / 1000) + " KB");
 
     uint8_t b[1024];
     memset(b, 127, 1024);
     p.writeVarInt(1024); // array length 2 bytes as varint
     p.write(b, 1024); // 127 = void biome
-    loginfo("Free heap: " + String(esp_get_free_heap_size() / 1000) + " KB");
+    writeFreeHeap();
     
     p.writeVarInt(4487); // magic 
 
@@ -519,7 +525,7 @@ void minecraft::player::writeChunk(uint8_t x, uint8_t y){
             }
         }
     }
-    loginfo("Free heap: " + String(esp_get_free_heap_size() / 1000) + " KB");
+    writeFreeHeap();
 
     p.writeShort(non_air_blocks); // non-air blocks 
     p.writeUnsignedByte(8); // bits per block
@@ -528,12 +534,12 @@ void minecraft::player::writeChunk(uint8_t x, uint8_t y){
     p.writeVarInt(512); // we're sending 512 longs or 4096 bytes
     uint8_t * buf = (uint8_t*)chunk[x][y];
     p.write(buf, 4096);
-    loginfo("Free heap: " + String(esp_get_free_heap_size() / 1000) + " KB");
+    writeFreeHeap();
 
     p.writeVarInt(0); // no block entities
     p.writePacket();
-    logout("chunk sent");
-    loginfo("Free heap: " + String(esp_get_free_heap_size() / 1000) + " KB");
+    logout("Chunk sent");
+    writeFreeHeap();
 }
 
 
@@ -548,7 +554,7 @@ void minecraft::player::writePlayerPositionAndLook(double x, double y, double z,
     p.writeUnsignedByte(flags);
     p.writeVarInt(0x55);
     p.writePacket();
-    logout("player position and look sent");
+    logout("Player position and look sent");
 }
 
 void minecraft::player::writeKeepAlive(){
@@ -556,7 +562,7 @@ void minecraft::player::writeKeepAlive(){
     p.writeVarInt(0x1F);
     uint32_t num = millis()/1000;
     p.writeLong(num);
-    logout("keepalive sent: " + String(num));
+    logout("Keepalive sent: " + String(num));
     p.writePacket();
 }
 
@@ -565,7 +571,7 @@ void minecraft::player::writeServerDifficulty(){
     p.writeVarInt(0x0D);
     p.writeUnsignedByte(0);
     p.writeBoolean(1);
-    logout("server difficulty packet sent");
+    logout("Server difficulty packet sent");
     p.writePacket();
 }
 
@@ -580,10 +586,11 @@ void minecraft::player::writeSpawnPlayer(double x, double y, double z, int _yaw_
     p.writeUnsignedByte(_yaw_i); // player yaw
     p.writeUnsignedByte(_pitch_i); // player pitch
     p.writePacket();
-    logout("spawn player sent id:" + String(id));
+    logout("Spawn player sent id:" + String(id));
 }
 
 void minecraft::player::writeJoinGame(){
+    String overworld = "minecraft:overworld";
     packet p(S, mtx);
     p.writeVarInt(0x24);
     p.writeInt(id); // entity id
@@ -591,10 +598,10 @@ void minecraft::player::writeJoinGame(){
     p.writeUnsignedByte(0); // gamemode
     p.writeByte(-1); // previous gamemode
     p.writeVarInt(1); // only one world
-    p.writeString("minecraft:overworld"); // only one world
+    p.writeString(overworld); // only one world
     p.write(dimension_codec_NBT, sizeof(dimension_codec_NBT) / sizeof(dimension_codec_NBT[0])); // NBT with world settings
     p.write(dimension_NBT, sizeof(dimension_NBT) / sizeof(dimension_NBT[0])); // NBT with world settings
-    p.writeString("minecraft:overworld"); // spawn world
+    p.writeString(overworld); // spawn world
     p.writeLong(0); // hashed seed
     p.writeVarInt(10); // max players
     p.writeVarInt(12); // view distance
@@ -602,7 +609,7 @@ void minecraft::player::writeJoinGame(){
     p.writeBoolean(1); // enable respawn screen
     p.writeBoolean(0); // is debug world
     p.writeBoolean(1); // is flat
-    logout("join game packet sent");
+    logout("Join game packet sent");
     p.writePacket();
 }
 
@@ -639,9 +646,10 @@ void minecraft::player::writeInventoryItems() {
 }
 
 void minecraft::player::writeResponse(){
+    String uuid = "00000000-0000-0000-0000-00000000000";
     packet p(S, mtx);
     p.writeVarInt(0);
-    p.writeString("{\"version\": {\"name\": \"1.16.5\",\"protocol\": 754},\"players\": {\"max\": 2,\"online\": 2,\"sample\": [{\"name\": \"Woodie's ESP32\",\"id\": \"00000000-0000-0000-0000-000000000000\"},{\"name\": \"MC Server\",\"id\": \"00000000-0000-0000-0000-000000000001\"}]},\"description\": {\"text\": \"esp32 server\"}}");
+    p.writeString("{\"version\": {\"name\": \"1.16.5\",\"protocol\": 754},\"players\": {\"max\": 2,\"online\": 2,\"sample\": [{\"name\": \"Woodie's ESP32\",\"id\": \"" + uuid + "0\"},{\"name\": \"MC Server\",\"id\": \"" + uuid + "1\"}]},\"description\": {\"text\": \"esp32 server\"}}");
     logout("response packet sent");
     p.writePacket();
 }
@@ -974,8 +982,8 @@ void minecraft::player::writeSpawnPackets() {
 
     writePlayerPositionAndLook(spawnX, spawnY, spawnZ, 0, 0, 0x00);
     writeServerDifficulty();
-    for (uint8_t i = 0; i < 6; i++) {
-        for (uint8_t j = 0; j < 6; j++) {
+    for (uint8_t i = 0; i < 2; i++) {
+        for (uint8_t j = 0; j < 2; j++) {
             writeChunk(i, j);
         }
     }
@@ -1071,7 +1079,6 @@ void minecraft::player::handle(){
         }
     }
 }
-
 // UTILITIES
 void minecraft::player::loginfo(String msg){
     Serial.println( "[INFO] p" + String(id) + " " + msg);
@@ -1092,14 +1099,15 @@ void minecraft::player::logout(String msg){
 uint8_t minecraft::player::findFreeInvSlot(uint16_t itemID){
     uint8_t bestCandidate = 0;
     uint8_t bestCandidateType = 0;
+    String s = " slot ";
     for (uint8_t i = 36; i < 46; i++){
-        loginfo("Checking slot " + String(i));
+        loginfo("Checking" + s + String(i));
         uint8_t slotFree = isSlotFree(i, itemID);
         if (slotFree == 2 && bestCandidateType != 2){
-            loginfo("Found perfect slot " + String(i));
+            loginfo("Found perfect" + s + String(i));
             return i;
         } else if (slotFree == 1 && bestCandidateType == 0){
-            loginfo("Found free slot " + String(i));
+            loginfo("Found free" + s + String(i));
             bestCandidate = i;
             bestCandidateType = 1;
         }
@@ -1118,7 +1126,7 @@ uint8_t minecraft::player::findFreeInvSlot(uint16_t itemID){
 }
 
 uint8_t minecraft::player::isSlotFree(uint8_t slot, uint16_t itemID){
-    if (inventory[slot].present == true) {
+    if (inventory[slot].present) {
         if (inventory[slot].itemID == itemID && inventory[slot].itemCount < 64) {
             return 2;
         }
