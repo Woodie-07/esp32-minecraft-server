@@ -106,6 +106,7 @@ class minecraft{
 
         void writeResponse      ();
         void writeLoginSuccess  ();
+        void writeFreeHeap      ();
         void writeChunk         (uint8_t x, uint8_t y);
         void writePlayerPositionAndLook(double x, double y, double z, float yaw, float pitch, uint8_t flags);
         void writeKeepAlive     ();
