@@ -306,9 +306,9 @@ void minecraft::player::readBlockPlacement(){
     int8_t chunkX = blockX / 16;
     int8_t chunkZ = blockZ / 16;
 
-    if (chunkX > 1 || chunkZ > 1 || chunkX < 0 || chunkZ < 0) {
-        return;
-    }
+    //if (chunkX > 1 || chunkZ > 1 || chunkX < 0 || chunkZ < 0) {
+    //    return;
+    //}
 
 
     uint8_t slotPlacedFrom;
@@ -352,7 +352,8 @@ void minecraft::player::readBlockPlacement(){
 
     chunk[chunkX][chunkZ][blockY][chunkBlockZ][chunkBlockArrayX] = blockPlaced;
 
-    mc->broadcastChunk(chunkX, chunkZ, id);
+    //mc->broadcastChunk(chunkX, chunkZ, id);
+    mc->broadcastChunk(chunkX, chunkZ, 255);
 }
 
 void minecraft::broadcastChunk(int8_t chunkX, int8_t chunkZ, uint8_t idToNotSendTo) {

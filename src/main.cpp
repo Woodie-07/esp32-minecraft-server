@@ -86,7 +86,7 @@ void loop(){
             if (!serverClients[i].socket || !serverClients[i].socket.connected()){
                 if(serverClients[i].socket) serverClients[i].socket.stop();
                 serverClients[i].socket = server.available();
-                Serial.print("[INFO] New client connected: "); Serial.println(i);
+                Serial.print("[INFO] New client connected: "); Serial.print(i); Serial.print(" from "); Serial.println(serverClients[i].socket.remoteIP().toString());
                 char name[20];
                 snprintf(name, 20, "playerHandler%d", i);
                 xTaskCreatePinnedToCore(playerHandler, name, 50000, (void*)&serverClients[i], 2, NULL, i % 2);
