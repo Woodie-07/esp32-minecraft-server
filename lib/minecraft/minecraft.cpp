@@ -86,16 +86,92 @@ void minecraft::player::readChat(){
     login("<" + username + "> " + m);
     if(m == "/stats"){
         writeChat("freeheap: " + String(esp_get_free_heap_size() / 1000) + "kB", "server");
-    } else {
+    } else if (m == "/on") {
+        digitalWrite(26, HIGH);
+        mc->broadcastChatMessage("Turned LED on", "LED");
+    } else if (m == "/off") {
+        digitalWrite(26, LOW);
+        mc->broadcastChatMessage("Turned LED off", "LED");
+    }
+    else {
         mc->broadcastChatMessage(m, username);
     }
+}
+
+void minecraft::player::readClientStatus(){
+    int32_t action = readVarInt();
+    if (action == 0) {
+        writeRespawn();
+    } else {
+        loginfo("Ignoring client status statistics packet");
+    }
+}
+
+void minecraft::player::readClickWindow(){
+    loginfo("Click window packet received");
+
+    int8_t windowID = readByte();
+    int16_t slot = readShort();
+    uint8_t button = readByte();
+    int16_t action = readShort();
+    int32_t mode = readVarInt();
+    bool present = readBool();
+    loginfo("Window ID: " + String(windowID));
+    loginfo("Slot: " + String(slot));
+    loginfo("Button: " + String(button));
+    loginfo("Action: " + String(action));
+    loginfo("Mode: " + String(mode));
+    loginfo("Present: " + String(present));
+    if(present){
+        int32_t itemID = readVarInt();
+        int8_t itemCount = readByte();
+        bool endOfNBT = false;
+        while (!endOfNBT) {
+            uint8_t nbtByte = readByte();
+            if (nbtByte == 0) {
+                endOfNBT = true;
+            }
+        }
+        loginfo("Item ID: " + String(itemID));
+        loginfo("Item Count: " + String(itemCount));
+    }
+
+}
+
+void minecraft::player::readInteractEntity(){
+    int8_t windowID = readByte();
 }
 
 void minecraft::player::readPosition(){
     x = readDouble();
     y = readDouble();
     z = readDouble();
+    bool wasOnGround = on_ground;
     on_ground = readBool();
+
+    if (health == 0) return; // if they are dead then don't do anything
+
+    if (wasOnGround != on_ground) {
+        loginfo("Changed on_ground to " + String(on_ground));
+        if (on_ground) {
+            int16_t distanceFallen = onGroundY - y;
+            loginfo("Distance fallen: " + String(distanceFallen));
+            if (distanceFallen > 3) {
+                health -= distanceFallen - 3; // reduce health by the distance fallen
+                mc->broadcastEntityAnimation(1, id);  // do damage tick animation
+                writeHealth(); // send health data to client
+            }
+        }
+    }
+    
+    if (on_ground) onGroundY = y;
+
+    if (y < -100) {
+        health = 0;
+        food = 0;
+        food_sat = 0;
+        writeHealth();
+    }
     mc->broadcastPlayerPosAndLook(x, y, z, yaw_i, pitch_i, on_ground, id);
     // login("player pos " + String(x) + " " + String(y) + " " + String(z));
 }
@@ -132,14 +208,159 @@ void minecraft::player::readTeleportConfirm(){
     login("teleport confirm");
 }
 
+void minecraft::player::readHeldItem(){
+    selectedSlot = readUnsignedShort() + 36;
+}
+
 void minecraft::player::readAnimation(){
     mc->broadcastEntityAnimation(readVarInt(), id);  
+}
+
+void minecraft::player::readAction(){
+    int32_t status = readVarInt();
+    uint64_t position = readUnsignedLong();
+    uint8_t face = readByte();
+
+    int32_t blockX = position >> 38;
+    int32_t blockY = position & 0xFFF;
+    int32_t blockZ = (position >> 12) & 0x3FFFFFF;
+
+    if (blockY > 16) return;
+
+    if (status == 2) {
+        int8_t chunkX = blockX / 16;
+        int8_t chunkZ = blockZ / 16;
+
+        if (chunkX > 1 || chunkZ > 1 || chunkX < 0 || chunkZ < 0) {
+            return;
+        }
+        int8_t chunkBlockX = blockX % 16;
+        int8_t chunkBlockZ = blockZ % 16;
+        int8_t chunkBlockArrayX;
+        if (chunkBlockX < 8) {
+            chunkBlockArrayX = 7 - chunkBlockX;
+        } else {
+            chunkBlockArrayX = 15 - (chunkBlockX - 8);
+        }
+        u_int8_t blockBroken = chunk[chunkX][chunkZ][blockY][chunkBlockZ][chunkBlockArrayX];
+        chunk[chunkX][chunkZ][blockY][chunkBlockZ][chunkBlockArrayX] = 0x00;
+        mc->broadcastChunk(chunkX, chunkZ, id);
+
+        uint16_t itemID = blockToItem(blockBroken);
+        uint8_t slotToAddTo = findFreeInvSlot(itemID);
+        loginfo("Adding to slot " + String(slotToAddTo));
+        if (slotToAddTo != 0 && itemID != 0) {
+            uint8_t currentAmount;
+            if (!inventory[slotToAddTo].present) currentAmount = 0;
+            else currentAmount = inventory[slotToAddTo].itemCount;
+            uint8_t newAmount = currentAmount + 1;
+            inventory[slotToAddTo] = {true, itemID, newAmount};
+            writeInventorySlot(true, slotToAddTo, itemID, newAmount);
+        }
+    }
 }
 
 void minecraft::player::readEntityAction(){
     readVarInt(); // we don't need our own id lmao
     mc->broadcastEntityAction(readVarInt(), id);
     readVarInt(); // we don't need horse jump boost
+}
+
+void minecraft::player::readBlockPlacement(){
+    uint8_t hand = readVarInt(); // 0: main hand, 1: off hand.
+    uint64_t position = readUnsignedLong();
+    uint8_t face = readVarInt();
+    for (uint8_t i = 0; i < 3; i++) {
+        readFloat(); // cursor position on block, not needed right now
+    }
+    readBool(); // if the player's head is inside a block, not needed right now
+
+    int32_t blockX = position >> 38;
+    int32_t blockY = position & 0xFFF;
+    int32_t blockZ = (position >> 12) & 0x3FFFFFF;
+
+    switch (face) {
+        case 0:
+            blockY--;
+            break;
+        case 1:
+            blockY++;
+            break;
+        case 2:
+            blockZ--;
+            break;
+        case 3:
+            blockZ++;
+            break;
+        case 4:
+            blockX--;
+            break;
+        case 5:
+            blockX++;
+            break;
+    }
+
+    if (blockY < 0) return;
+    if (blockX < 0 || blockZ < 0) return;
+
+    int8_t chunkX = blockX / 16;
+    int8_t chunkZ = blockZ / 16;
+
+    if (chunkX > 1 || chunkZ > 1 || chunkX < 0 || chunkZ < 0) {
+        return;
+    }
+
+
+    uint8_t slotPlacedFrom;
+    if (hand == 0) slotPlacedFrom = selectedSlot; else slotPlacedFrom = 45;
+
+    if (!inventory[slotPlacedFrom].present) {
+        return;
+    }
+
+    // check if block will collide with player
+    if (y + 1.7 >= blockY && std::floor(y) <= blockY && x + 0.3 >= blockX && x - 0.3 <= blockX + 1 && z + 0.3 >= blockZ && z - 0.3 <= blockZ + 1) {
+        return;
+    }
+
+    int8_t chunkBlockX = blockX % 16;
+    int8_t chunkBlockZ = blockZ % 16;
+
+    if (blockY >= 16) {
+        return;
+    }
+
+    int8_t chunkBlockArrayX;
+    if (chunkBlockX < 8) {
+        chunkBlockArrayX = 7 - chunkBlockX;
+    } else {
+        chunkBlockArrayX = 15 - (chunkBlockX - 8);
+    }
+
+    uint16_t blockPlaced = inventory[slotPlacedFrom].itemID;
+    uint8_t currentItemCount = inventory[slotPlacedFrom].itemCount;
+    uint8_t newItemCount = currentItemCount - 1;
+    if (newItemCount == 0) {
+        inventory[slotPlacedFrom].present = false;
+    } else {
+        inventory[slotPlacedFrom].itemCount = newItemCount;
+    }
+    writeInventoryItems();
+
+    blockPlaced = itemToBlock(blockPlaced);
+    if (blockPlaced == 0) blockPlaced = 1;
+
+    chunk[chunkX][chunkZ][blockY][chunkBlockZ][chunkBlockArrayX] = blockPlaced;
+
+    mc->broadcastChunk(chunkX, chunkZ, id);
+}
+
+void minecraft::broadcastChunk(int8_t chunkX, int8_t chunkZ, uint8_t idToNotSendTo) {
+    for(auto player : players){
+        if(player.connected && player.id != idToNotSendTo){
+            player.writeChunk(chunkX, chunkZ);
+        }
+    }
 }
 
 // CLIENTBOUND BROADCAST
@@ -267,34 +488,54 @@ void minecraft::player::writeLoginSuccess(){
 }
 
 void minecraft::player::writeChunk(uint8_t x, uint8_t y){
+    loginfo("Free heap: " + String(esp_get_free_heap_size() / 1000) + " KB");
     packet p(S, mtx);
     p.writeVarInt(0x20); 
     p.writeInt(x); // X
     p.writeInt(y); // Z
     p.writeBoolean(1); // full chunk yes
     p.writeVarInt(0x01); //bitmask set to 0xFF because we're sending the whole chunk
+    loginfo("Free heap: " + String(esp_get_free_heap_size() / 1000) + " KB");
 
     p.write(height_map_NBT, sizeof(height_map_NBT) / sizeof(height_map_NBT[0]));
+    loginfo("Free heap: " + String(esp_get_free_heap_size() / 1000) + " KB");
 
     uint8_t b[1024];
     memset(b, 127, 1024);
     p.writeVarInt(1024); // array length 2 bytes as varint
     p.write(b, 1024); // 127 = void biome
+    loginfo("Free heap: " + String(esp_get_free_heap_size() / 1000) + " KB");
     
     p.writeVarInt(4487); // magic 
 
-    p.writeShort(1); // non-air blocks (can't be bothered calculating it and the client doesn't need it)
+    // calculate non-air blocks in chunk
+    uint16_t non_air_blocks = 0;
+    for(uint8_t i = 0; i < 16; i++){
+        for(uint8_t j = 0; j < 16; j++){
+            for(uint8_t k = 0; k < 16; k++){
+                if(chunk[x][y][i][j][k] != 0){
+                    non_air_blocks++;
+                }
+            }
+        }
+    }
+    loginfo("Free heap: " + String(esp_get_free_heap_size() / 1000) + " KB");
+
+    p.writeShort(non_air_blocks); // non-air blocks 
     p.writeUnsignedByte(8); // bits per block
     p.writeVarInt(256); // palette length 8 bits per block
     p.write(palette, 384); // write palette
     p.writeVarInt(512); // we're sending 512 longs or 4096 bytes
     uint8_t * buf = (uint8_t*)chunk[x][y];
     p.write(buf, 4096);
+    loginfo("Free heap: " + String(esp_get_free_heap_size() / 1000) + " KB");
 
     p.writeVarInt(0); // no block entities
     p.writePacket();
     logout("chunk sent");
+    loginfo("Free heap: " + String(esp_get_free_heap_size() / 1000) + " KB");
 }
+
 
 void minecraft::player::writePlayerPositionAndLook(double x, double y, double z, float _yaw, float _pitch, uint8_t flags){
     packet p(S, mtx);
@@ -358,17 +599,49 @@ void minecraft::player::writeJoinGame(){
     p.writeVarInt(10); // max players
     p.writeVarInt(12); // view distance
     p.writeBoolean(0); // reduced debug info
-    p.writeBoolean(0); // enable respawn screen
+    p.writeBoolean(1); // enable respawn screen
     p.writeBoolean(0); // is debug world
     p.writeBoolean(1); // is flat
     logout("join game packet sent");
     p.writePacket();
 }
 
+void minecraft::player::writeRespawn() {
+    health = 20;
+    packet p(S, mtx);
+    p.writeVarInt(0x39);
+    p.write(dimension_NBT, sizeof(dimension_NBT) / sizeof(dimension_NBT[0])); // NBT with world settings
+    p.writeString("minecraft:overworld"); // spawn world
+    p.writeLong(0); // hashed seed
+    p.writeUnsignedByte(0); // gamemode
+    p.writeByte(-1); // previous gamemode
+    p.writeBoolean(0); // is debug world
+    p.writeBoolean(1); // is flat
+    p.writeBoolean(0); // do not copy met
+    p.writePacket();
+    writeSpawnPackets();
+}
+
+void minecraft::player::writeInventoryItems() {
+    packet p(S, mtx);
+    p.writeVarInt(0x13);
+    p.writeUnsignedByte(0); // window id
+    p.writeShort(46); // slot count
+    for (int i = 0; i < 46; i++) {
+        p.writeBoolean(inventory[i].present ? 1 : 0); // is present
+        if (inventory[i].present) {
+            p.writeVarInt(inventory[i].itemID); // id
+            p.writeByte(inventory[i].itemCount); // count
+            p.writeByte(0); // nbt
+        }
+    }
+    p.writePacket();
+}
+
 void minecraft::player::writeResponse(){
     packet p(S, mtx);
     p.writeVarInt(0);
-    p.writeString("{\"version\": {\"name\": \"1.16.5\",\"protocol\": 754},\"players\": {\"max\": 5,\"online\": 5,\"sample\": [{\"name\": \"L_S___S_S_S__S_L\",\"id\": \"00000000-0000-0000-0000-000000000000\"},{\"name\": \"L_SS__S_S_S_S__L\",\"id\": \"00000000-0000-0000-0000-000000000001\"},{\"name\": \"L_S_S_S_S_SS___L\",\"id\": \"00000000-0000-0000-0000-000000000002\"},{\"name\": \"L_S__SS_S_S_S__L\",\"id\": \"00000000-0000-0000-0000-000000000003\"},{\"name\": \"L_S___S_S_S__S_L\",\"id\": \"00000000-0000-0000-0000-000000000004\"}]},\"description\": {\"text\": \"esp32 server\"}}");
+    p.writeString("{\"version\": {\"name\": \"1.16.5\",\"protocol\": 754},\"players\": {\"max\": 2,\"online\": 2,\"sample\": [{\"name\": \"Woodie's ESP32\",\"id\": \"00000000-0000-0000-0000-000000000000\"},{\"name\": \"MC Server\",\"id\": \"00000000-0000-0000-0000-000000000001\"}]},\"description\": {\"text\": \"esp32 server\"}}");
     logout("response packet sent");
     p.writePacket();
 }
@@ -455,8 +728,35 @@ void minecraft::player::writeEntityDestroy(uint8_t id){
     p.writePacket();
 }
 
+void minecraft::player::writeInventorySlot(bool present, uint16_t slot, uint32_t itemID, uint8_t itemCount) {
+    packet p(S, mtx);
+    p.writeVarInt(0x15); // packet id
+    p.writeByte(0); // window id (0 for inventory)
+    p.writeShort(slot); // slot index
+    p.writeBoolean(present ? 1 : 0); // is present
+    if(present){
+        p.writeVarInt(itemID); // item id
+        p.writeByte(itemCount); // item count
+        p.writeByte(0); // no nbt
+    }
+    p.writePacket();
+}
+
+void minecraft::player::writeHealth() {
+    packet p(S, mtx);
+    p.writeVarInt(0x49); // packet id
+    p.writeFloat(health); // packet id
+    p.writeVarInt(food);
+    p.writeFloat(food_sat);
+    p.writePacket();
+}
+
 // READ TYPES
 uint16_t minecraft::player::readUnsignedShort(){
+    return readShort();
+}
+
+int16_t minecraft::player::readShort(){
     while(S->available() < 2);
     int ret = S->read();
     return (ret << 8) | S->read();
@@ -485,6 +785,10 @@ double minecraft::player::readDouble(){
 }
 
 int64_t minecraft::player::readLong(){
+    return readUnsignedLong();
+}
+
+uint64_t minecraft::player::readUnsignedLong() {
     char b[8] = {};
     while(S->available() < 8);
     for(int i=0; i<8; i++){
@@ -642,6 +946,42 @@ void minecraft::player::writeLength(uint32_t length){
     } while (length != 0);
 }
 
+void minecraft::player::writeSpawnPackets() {
+    double spawnX = 8.5;
+    double spawnZ = 8.5;
+
+    uint8_t spawnY;
+
+    uint8_t spawnBlockX = std::floor(spawnX);
+    uint8_t spawnBlockZ = std::floor(spawnZ);
+
+    int8_t chunkX = spawnBlockX / 16;
+    int8_t chunkZ = spawnBlockZ / 16;
+
+    uint8_t chunkBlockArrayX;
+    if (spawnBlockX < 8) {
+        chunkBlockArrayX = 7 - spawnBlockX;
+    } else {
+        chunkBlockArrayX = 15 - (spawnBlockX  - 8);
+    }
+    for (uint8_t i = 0; i < 16; i++) {
+        if (chunk[chunkX][chunkZ][i][spawnBlockZ][chunkBlockArrayX] == 0x00 && chunk[chunkX][chunkZ][i + 1][spawnBlockZ][chunkBlockArrayX] == 0x00) {
+            spawnY = i;
+            break;
+        }
+    }
+    if (spawnY == 0) spawnY = 16;
+
+    writePlayerPositionAndLook(spawnX, spawnY, spawnZ, 0, 0, 0x00);
+    writeServerDifficulty();
+    for (uint8_t i = 0; i < 2; i++) {
+        for (uint8_t j = 0; j < 2; j++) {
+            writeChunk(i, j);
+        }
+    }
+    writeInventoryItems();
+}
+
 // HANDLERS
 bool minecraft::player::join(){
     uint8_t res = readHandShake();
@@ -658,12 +998,7 @@ bool minecraft::player::join(){
     }
     connected = true;
     writeJoinGame();
-    writePlayerPositionAndLook(0, 5, 0, 0, 0, 0x00);
-    writeServerDifficulty();
-    writeChunk(0, 0);
-    writeChunk(0, 1);
-    writeChunk(1, 0);
-    writeChunk(1, 1);
+    writeSpawnPackets();
     mc->broadcastPlayerInfo();
     mc->broadcastChatMessage(username + " joined the server", "Server");
     mc->broadcastSpawnPlayer();
@@ -686,6 +1021,15 @@ void minecraft::player::handle(){
         case 0x03:
             readChat();
             break;
+        case 0x04:
+            readClientStatus();
+            break;
+        case 0x09:
+            readClickWindow();
+            break;
+        case 0x0E:
+            readInteractEntity();
+            break;
         case 0x12:
             readPosition();
             break;
@@ -701,11 +1045,20 @@ void minecraft::player::handle(){
         case 0x00:
             readTeleportConfirm();
             break;
+        case 0x25:
+            readHeldItem();
+            break;
         case 0x2C:
             readAnimation();
             break;
+        case 0x1B:
+            readAction();
+            break;
         case 0x1C:
             readEntityAction();
+            break;
+        case 0x2E:
+            readBlockPlacement();
             break;
         default:
             loginfo("id: 0x" + String(packetid, HEX) + " length: " + String(length));
@@ -734,6 +1087,63 @@ void minecraft::player::login(String msg){
 
 void minecraft::player::logout(String msg){
     Serial.println( "[INFO] p" + String(id) + " -> " + msg);
+}
+
+uint8_t minecraft::player::findFreeInvSlot(uint16_t itemID){
+    uint8_t bestCandidate = 0;
+    uint8_t bestCandidateType = 0;
+    for (uint8_t i = 36; i < 46; i++){
+        loginfo("Checking slot " + String(i));
+        uint8_t slotFree = isSlotFree(i, itemID);
+        if (slotFree == 2 && bestCandidateType != 2){
+            loginfo("Found perfect slot " + String(i));
+            return i;
+        } else if (slotFree == 1 && bestCandidateType == 0){
+            loginfo("Found free slot " + String(i));
+            bestCandidate = i;
+            bestCandidateType = 1;
+        }
+    }
+    if (bestCandidate == 1) return bestCandidate;
+    for (uint8_t i = 9; i < 36; i++){
+        uint8_t slotFree = isSlotFree(i, itemID);
+        if (slotFree == 2 && bestCandidateType != 2){
+            return i;
+        } else if (slotFree == 1 && bestCandidateType == 0){
+            bestCandidate = i;
+            bestCandidateType = 1;
+        }
+    }
+    return bestCandidate;
+}
+
+uint8_t minecraft::player::isSlotFree(uint8_t slot, uint16_t itemID){
+    if (inventory[slot].present == true) {
+        if (inventory[slot].itemID == itemID && inventory[slot].itemCount < 64) {
+            return 2;
+        }
+        return 0;
+    } else {
+        return 1;
+    }
+}
+
+uint16_t minecraft::player::blockToItem(uint16_t blockID) {
+    auto it = blockStateToItemMap.find(blockID);  // find the key
+    if (it != blockStateToItemMap.end()) {
+        return it->second;
+    } else {
+        return 0;
+    }
+}
+
+uint16_t minecraft::player::itemToBlock(uint16_t itemID) {
+    for (auto const& pair : blockStateToItemMap) {
+        if (pair.second == itemID) {
+            return pair.first;
+        }
+    }
+    return 0;
 }
 
 int32_t lsr(int32_t x, uint32_t n){

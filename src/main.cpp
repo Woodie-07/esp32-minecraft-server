@@ -50,9 +50,11 @@ void setup() {
     disableCore0WDT();
     disableCore1WDT();
     disableLoopWDT();
-
+    
     Serial.begin(115200);
     delay(100);
+    pinMode(26, OUTPUT);
+    digitalWrite(26, LOW);
     WiFi.begin(ssid, password); 
     while (WiFi.status() != WL_CONNECTED) {
         delay(1000);
@@ -60,8 +62,6 @@ void setup() {
     }
     Serial.println("Connected to the WiFi network");
     Serial.println(WiFi.localIP());
-
-    delay(1000);
 
     for(int i = 0; i < MAX_PLAYERS; i++){
         mc.players[i].S = &serverClients[i].socket;
