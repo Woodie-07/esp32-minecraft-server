@@ -975,8 +975,8 @@ void minecraft::player::writeSpawnPackets() {
 
     writePlayerPositionAndLook(spawnX, spawnY, spawnZ, 0, 0, 0x00);
     writeServerDifficulty();
-    for (uint8_t i = 0; i < 2; i++) {
-        for (uint8_t j = 0; j < 2; j++) {
+    for (uint8_t i = 0; i < 6; i++) {
+        for (uint8_t j = 0; j < 6; j++) {
             writeChunk(i, j);
         }
     }
