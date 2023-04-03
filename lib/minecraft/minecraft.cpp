@@ -2,12 +2,12 @@
 #include <chunk.h>
 
 // PACKET
-void packet::write(uint8_t val){
+void packet::write(const uint8_t val){
     buffer[index] = val;
     index ++;
 }
 
-void packet::write(uint8_t * buf, size_t size){
+void packet::write(const uint8_t * buf, size_t size){
     memcpy(buffer + index, std::move(buf), size);
     index += size;
 }
@@ -378,9 +378,14 @@ void minecraft::player::readBlockPlacement(){
     }
 
     // check if block will collide with player
-    if (y + 1.7 >= blockY && std::floor(y) <= blockY && x + 0.3 >= blockX && x - 0.3 <= blockX + 1 && z + 0.3 >= blockZ && z - 0.3 <= blockZ + 1) {
-        return;
+    for(const auto& player : mc->players){
+        if(player.connected){
+            if (player.y + 1.7 >= blockY && std::floor(player.y) <= blockY && player.x + 0.3 >= blockX && player.x - 0.3 <= blockX + 1 && player.z + 0.3 >= blockZ && player.z - 0.3 <= blockZ + 1) {
+                return;
+            }
+        }
     }
+
 
     int8_t chunkBlockX = blockX % 16;
     int8_t chunkBlockZ = blockZ % 16;
@@ -416,7 +421,7 @@ void minecraft::player::readBlockPlacement(){
 }
 
 void minecraft::broadcastChunk(int8_t chunkX, int8_t chunkZ, uint8_t idToNotSendTo) {
-    for(auto player : players){
+    for(auto& player : players){
         if(player.connected && player.id != idToNotSendTo){
             player.writeChunk(chunkX, chunkZ);
         }
@@ -425,7 +430,7 @@ void minecraft::broadcastChunk(int8_t chunkX, int8_t chunkZ, uint8_t idToNotSend
 
 // CLIENTBOUND BROADCAST
 void minecraft::broadcastChatMessage(String msg, String username){
-    for(auto player : players){
+    for(auto& player : players){
         if(player.connected){
             player.writeChat(msg, username);
         }
@@ -433,9 +438,9 @@ void minecraft::broadcastChatMessage(String msg, String username){
 }
 
 void minecraft::broadcastSpawnPlayer(){
-    for(auto player : players){
+    for(auto& player : players){
         if(player.connected){
-            for(auto p : players){
+            for(const auto& p : players){
                 if(p.id != player.id && p.connected){
                     player.writeSpawnPlayer(p.x, p.y, p.z, p.yaw_i, p.pitch_i, p.id);
                     player.writeEntityLook(p.yaw_i, p.id);
@@ -446,7 +451,7 @@ void minecraft::broadcastSpawnPlayer(){
 }
 
 void minecraft::broadcastPlayerPosAndLook(double x, double y, double z, int _yaw_i, int _pitch_i, bool on_ground, uint8_t id){
-    for(auto player : players){
+    for(auto& player : players){
         if(player.connected && player.id != id){
             player.writeEntityTeleport(x, y, z, _yaw_i, _pitch_i, on_ground, id);
             player.writeEntityLook(_yaw_i, id);
@@ -455,7 +460,7 @@ void minecraft::broadcastPlayerPosAndLook(double x, double y, double z, int _yaw
 }
 
 void minecraft::broadcastPlayerRotation(int _yaw_i, int _pitch_i, bool on_ground, uint8_t id){
-    for(auto player : players){
+    for(auto& player : players){
         if(player.connected && player.id != id){
             player.writeEntityRotation(_yaw_i, _pitch_i, on_ground, id);
             player.writeEntityLook(_yaw_i, id);
@@ -464,7 +469,7 @@ void minecraft::broadcastPlayerRotation(int _yaw_i, int _pitch_i, bool on_ground
 }
 
 void minecraft::broadcastEntityAnimation(uint8_t anim, uint8_t id, bool sendToSelf){
-    for(auto player : players){
+    for(auto& player : players){
         if(player.connected && (player.id != id || sendToSelf)){
             player.writeEntityAnimation(anim, id);
         }
@@ -472,7 +477,7 @@ void minecraft::broadcastEntityAnimation(uint8_t anim, uint8_t id, bool sendToSe
 }
 
 void minecraft::broadcastEntityAction(uint8_t action, uint8_t id){
-    for(auto player : players){
+    for(auto& player : players){
         if(player.connected && player.id != id){
             player.writeEntityAction(action, id);
         }
@@ -480,7 +485,7 @@ void minecraft::broadcastEntityAction(uint8_t action, uint8_t id){
 }
 
 void minecraft::broadcastEntityDestroy(uint8_t id){
-    for(auto player : players){
+    for(auto& player : players){
         if(player.connected && player.id != id){
             player.writeEntityDestroy(id);
         }
@@ -491,13 +496,13 @@ void minecraft::broadcastPlayerInfo(){
     // calculate data length in a horrible non-automated way for now TODO
     uint32_t num = getPlayerNum();
     // broadcast playerinfo
-    for(auto player : players){
+    for(auto& player : players){
         if(player.connected){
             packet pac(player.S, player.mtx);
             pac.writeVarInt(0x32);
             pac.writeVarInt(0); // action add player
             pac.writeVarInt(num); // number of players
-            for(auto p : players){
+            for(const auto& p : players){
                 if(p.connected){
                     pac.writeUUID(p.id); // first player's uuid
                     pac.writeString(p.username);
@@ -515,7 +520,7 @@ void minecraft::broadcastPlayerInfo(){
 
 uint8_t minecraft::getPlayerNum(){
     uint8_t i = 0;
-    for(auto player : players){
+    for(const auto& player : players){
         if(player.connected) i++;
     }
     return i;
@@ -1069,7 +1074,7 @@ bool minecraft::player::join(){
 }
 
 void minecraft::handle(){
-    for(auto player : players){
+    for(auto& player : players){
         if(player.connected){
             player.writeKeepAlive();
         }

@@ -22,8 +22,8 @@ class packet{
         mtx = _mtx;
     }
 
-    void write(uint8_t val);
-    void write(uint8_t * buf, size_t size);
+    void write(const uint8_t val);
+    void write(const uint8_t * buf, size_t size);
     void writePacket();
 
     void writeDouble        (double value);
