@@ -365,9 +365,9 @@ void minecraft::player::readBlockPlacement(){
     int8_t chunkX = blockX / 16;
     int8_t chunkZ = blockZ / 16;
 
-    if (chunkX > 1 || chunkZ > 1 || chunkX < 0 || chunkZ < 0) {
-        return;
-    }
+    //if (chunkX > 1 || chunkZ > 1 || chunkX < 0 || chunkZ < 0) {
+    //    return;
+    //}
 
 
     uint8_t slotPlacedFrom;
@@ -411,7 +411,8 @@ void minecraft::player::readBlockPlacement(){
 
     chunk[chunkX][chunkZ][blockY][chunkBlockZ][chunkBlockArrayX] = blockPlaced;
 
-    mc->broadcastChunk(chunkX, chunkZ, id);
+    //mc->broadcastChunk(chunkX, chunkZ, id);
+    mc->broadcastChunk(chunkX, chunkZ, 255);
 }
 
 void minecraft::broadcastChunk(int8_t chunkX, int8_t chunkZ, uint8_t idToNotSendTo) {
@@ -520,9 +521,20 @@ uint8_t minecraft::getPlayerNum(){
     return i;
 }
 
+String sanitise(String s) {
+    return s;
+    for (uint16_t index = 0; index < s.length(); index++) {
+        if (s[index] == '"') {
+            s = s.substring(0, index) + '\\' + s.substring(index);
+            index++;
+        }
+    }
+}
+
 // CLIENTBOUND PLAYER
 void minecraft::player::writeChat(String msg, String username){
     packet p(S, mtx);
+    msg = sanitise(msg);
     String s = "{\"text\": \"<" + username + "> " + msg + "\",\"bold\": \"false\"}";
     p.writeVarInt(0x0E);
     p.writeString(s);
