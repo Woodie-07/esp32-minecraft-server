@@ -123,7 +123,9 @@ class minecraft{
         void writeEntityPose    (uint8_t pose, uint8_t id);
         void writeEntityHealth  (float health, uint8_t entityID);
         void writeEntityDestroy (uint8_t id);
+        void writeEntityEquipment(uint8_t id, uint8_t slot, bool present, uint16_t itemID, uint8_t itemCount);
         void writeInventorySlot (bool present, uint16_t slot, uint32_t itemID, uint8_t itemCount);
+        void writeBlockChange   (int64_t x, int64_t y, int64_t z, uint16_t blockID);
         void writeHealth        ();
         void writeSpawnPackets  ();
         void writeRespawn       ();
@@ -160,7 +162,7 @@ class minecraft{
     player players[5];
 
     void handle                      ();
-    void broadcastChunk              (int8_t chunkX, int8_t chunkZ, uint8_t idToNotSendTo);
+    void broadcastChunk              (int8_t chunkX, int8_t chunkZ, uint8_t excludedPlayerID);
     void broadcastChatMessage        (String msg, String username);
     void broadcastSpawnPlayer        (uint8_t id);
     void broadcastPlayerPosAndLook   (double x, double y, double z, int yaw, int pitch, bool on_ground, uint8_t id);
@@ -171,6 +173,8 @@ class minecraft{
     void broadcastEntityHealth       (float health, uint8_t id);
     void broadcastEntityStatus       (uint8_t status, uint8_t id, bool sendToSelf = false);
     void broadcastEntityDestroy      (uint8_t id);
+    void broadcastEntityEquipment    (uint8_t id, uint8_t slot, bool present, uint16_t itemID, uint8_t itemCount);
+    void broadcastBlockChange        (int64_t x, int64_t y, int64_t z, uint16_t blockID, uint8_t excludedPlayerID);
     uint8_t getPlayerNum             ();
 };
 

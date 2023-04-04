@@ -276,6 +276,13 @@ void minecraft::player::readTeleportConfirm(){
 
 void minecraft::player::readHeldItem(){
     selectedSlot = readUnsignedShort() + 36;
+    slot* selectedItem = &inventory[selectedSlot];
+
+    if (selectedItem->present) {
+        mc->broadcastEntityEquipment(id, 0, true, selectedItem->itemID, selectedItem->itemCount);
+    } else {
+        mc->broadcastEntityEquipment(id, 0, false, 0, 0);
+    }
 }
 
 void minecraft::player::readAnimation(){
@@ -317,7 +324,7 @@ void minecraft::player::readAction(){
         }
         u_int8_t blockBroken = chunk[chunkX][chunkZ][blockY][chunkBlockZ][chunkBlockArrayX];
         chunk[chunkX][chunkZ][blockY][chunkBlockZ][chunkBlockArrayX] = 0x00;
-        mc->broadcastChunk(chunkX, chunkZ, id);
+        mc->broadcastBlockChange(blockX, blockY, blockZ, 0x00, id);
 
         uint16_t itemID = blockToItem(blockBroken);
         uint8_t slotToAddTo = findFreeInvSlot(itemID);
@@ -388,9 +395,9 @@ void minecraft::player::readBlockPlacement(){
     int8_t chunkX = blockX / 16;
     int8_t chunkZ = blockZ / 16;
 
-    //if (chunkX > 1 || chunkZ > 1 || chunkX < 0 || chunkZ < 0) {
-    //    return;
-    //}
+    if (chunkX > 1 || chunkZ > 1 || chunkX < 0 || chunkZ < 0) {
+        return;
+    }
 
 
     uint8_t slotPlacedFrom;
@@ -439,13 +446,12 @@ void minecraft::player::readBlockPlacement(){
 
     chunk[chunkX][chunkZ][blockY][chunkBlockZ][chunkBlockArrayX] = blockPlaced;
 
-    //mc->broadcastChunk(chunkX, chunkZ, id);
-    mc->broadcastChunk(chunkX, chunkZ, 255);
+    mc->broadcastBlockChange(blockX, blockY, blockZ, blockPlaced, id);
 }
 
-void minecraft::broadcastChunk(int8_t chunkX, int8_t chunkZ, uint8_t idToNotSendTo) {
+void minecraft::broadcastChunk(int8_t chunkX, int8_t chunkZ, uint8_t excludedPlayerID) {
     for(auto& player : players){
-        if(player.connected && player.id != idToNotSendTo){
+        if(player.connected && player.id != excludedPlayerID){
             player.writeChunk(chunkX, chunkZ);
         }
     }
@@ -535,6 +541,22 @@ void minecraft::broadcastEntityDestroy(uint8_t id){
     for(auto& player : players){
         if(player.connected && player.id != id){
             player.writeEntityDestroy(id);
+        }
+    }
+}
+
+void minecraft::broadcastEntityEquipment(uint8_t id, uint8_t slot, bool present, uint16_t itemID, uint8_t itemCount) {
+    for(auto& player : players){
+        if(player.connected && player.id != id){
+            player.writeEntityEquipment(id, slot, present, itemID, itemCount);
+        }
+    }
+}
+
+void minecraft::broadcastBlockChange(int64_t x, int64_t y, int64_t z, uint16_t blockID, uint8_t excludedPlayerID) {
+    for(auto& player : players){
+        if(player.connected && player.id != excludedPlayerID){
+            player.writeBlockChange(x, y, z, blockID);
         }
     }
 }
@@ -857,6 +879,30 @@ void minecraft::player::writeEntityDestroy(uint8_t id){
     p.writePacket();
 }
 
+void minecraft::player::writeEntityEquipment(uint8_t entityID, uint8_t slot, bool present, uint16_t itemID, uint8_t itemCount) {
+    packet p(S, mtx);
+    p.writeVarInt(0x47); // packet id
+    p.writeVarInt(entityID); 
+    p.writeByte(slot); 
+    p.writeBoolean(present); 
+    if (present) {
+        p.writeVarInt(itemID);
+        p.writeByte(itemCount);
+        p.writeByte(0x00); // no nbt
+    }
+    p.writePacket();
+    Serial.print("Told player id ");
+    Serial.print(id);
+    Serial.print(" that entity ID ");
+    Serial.print(entityID);
+    Serial.print(" has ");
+    Serial.print(itemCount);
+    Serial.print(" of ");
+    Serial.print(itemID);
+    Serial.print(" in slot ");
+    Serial.println(slot);
+}
+
 void minecraft::player::writeInventorySlot(bool present, uint16_t slot, uint32_t itemID, uint8_t itemCount) {
     packet p(S, mtx);
     p.writeVarInt(0x15); // packet id
@@ -868,6 +914,16 @@ void minecraft::player::writeInventorySlot(bool present, uint16_t slot, uint32_t
         p.writeByte(itemCount); // item count
         p.writeByte(0); // no nbt
     }
+    p.writePacket();
+}
+
+
+void minecraft::player::writeBlockChange(int64_t x, int64_t y, int64_t z, uint16_t blockID) {
+    packet p(S, mtx);
+    p.writeVarInt(0x0B);
+    uint64_t pos = ((x & 0x3FFFFFF) << 38) | ((z & 0x3FFFFFF) << 12) | (y & 0xFFF);
+    p.writeLong(pos);
+    p.writeVarInt(blockID);
     p.writePacket();
 }
 
@@ -1113,7 +1169,6 @@ void minecraft::player::writeSpawnPackets() {
         }
     }
     writeInventoryItems();
-    
 }
 
 // HANDLERS
@@ -1136,6 +1191,36 @@ bool minecraft::player::join(){
     mc->broadcastPlayerInfo();
     mc->broadcastChatMessage(username + " joined the server", "Server");
     mc->broadcastSpawnPlayer(id);
+
+    slot* selectedItem = &inventory[selectedSlot]; // item in hand
+    slot* selectedOffhand = &inventory[45]; // item in offhand
+
+    // broadcast held item
+    if (selectedItem->present) {
+        mc->broadcastEntityEquipment(id, 0, true, selectedItem->itemID, selectedItem->itemCount);
+    } else {
+        mc->broadcastEntityEquipment(id, 0, false, 0, 0);
+    }
+
+    // broadcast held offhand item
+    if (selectedOffhand->present) {
+        mc->broadcastEntityEquipment(id, 1, true, selectedOffhand->itemID, selectedOffhand->itemCount);
+    } else {
+        mc->broadcastEntityEquipment(id, 1, false, 0, 0);
+    }
+
+    // tell this player about everyone else's equipment
+    for(auto& player : mc->players){
+        if(player.connected && player.id != id){
+            slot* playerSelectedItem = &player.inventory[selectedSlot]; // item in hand
+            slot* playerSelectedOffhand = &player.inventory[45]; // item in offhand
+            // broadcast held item
+            if (playerSelectedItem->present) writeEntityEquipment(player.id, 0, true, playerSelectedItem->itemID, playerSelectedItem->itemCount);
+
+            // broadcast held offhand item
+            if (playerSelectedOffhand->present) writeEntityEquipment(player.id, 1, true, playerSelectedOffhand->itemID, playerSelectedOffhand->itemCount);
+        }
+    }
     return true;
 }
 
