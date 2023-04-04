@@ -131,6 +131,8 @@ class minecraft{
         void writeRespawn       ();
         void writeInventoryItems();
 
+        void updateEquipment    ();
+
         void loginfo            (String msg);
         void logerr             (String msg);
         void login              (String msg);

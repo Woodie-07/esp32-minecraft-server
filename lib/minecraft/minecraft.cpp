@@ -768,6 +768,8 @@ void minecraft::player::writeRespawn() {
     p.writePacket();
     writeSpawnPackets();
     mc->broadcastSpawnPlayer(id);
+    updateEquipment();
+    
 }
 
 void minecraft::player::writeInventoryItems() {
@@ -784,6 +786,38 @@ void minecraft::player::writeInventoryItems() {
         }
     }
     p.writePacket();
+}
+
+void minecraft::player::updateEquipment() {
+    slot* selectedItem = &inventory[selectedSlot]; // item in hand
+    slot* selectedOffhand = &inventory[45]; // item in offhand
+
+    // broadcast held item
+    if (selectedItem->present) {
+        mc->broadcastEntityEquipment(id, 0, true, selectedItem->itemID, selectedItem->itemCount);
+    } else {
+        mc->broadcastEntityEquipment(id, 0, false, 0, 0);
+    }
+
+    // broadcast held offhand item
+    if (selectedOffhand->present) {
+        mc->broadcastEntityEquipment(id, 1, true, selectedOffhand->itemID, selectedOffhand->itemCount);
+    } else {
+        mc->broadcastEntityEquipment(id, 1, false, 0, 0);
+    }
+
+    // tell this player about everyone else's equipment
+    for(auto& player : mc->players){
+        if(player.connected && player.id != id){
+            slot* playerSelectedItem = &player.inventory[selectedSlot]; // item in hand
+            slot* playerSelectedOffhand = &player.inventory[45]; // item in offhand
+            // broadcast held item
+            if (playerSelectedItem->present) writeEntityEquipment(player.id, 0, true, playerSelectedItem->itemID, playerSelectedItem->itemCount);
+
+            // broadcast held offhand item
+            if (playerSelectedOffhand->present) writeEntityEquipment(player.id, 1, true, playerSelectedOffhand->itemID, playerSelectedOffhand->itemCount);
+        }
+    }
 }
 
 void minecraft::player::writeResponse(){
@@ -1193,35 +1227,7 @@ bool minecraft::player::join(){
     mc->broadcastChatMessage(username + " joined the server", "Server");
     mc->broadcastSpawnPlayer(id);
 
-    slot* selectedItem = &inventory[selectedSlot]; // item in hand
-    slot* selectedOffhand = &inventory[45]; // item in offhand
-
-    // broadcast held item
-    if (selectedItem->present) {
-        mc->broadcastEntityEquipment(id, 0, true, selectedItem->itemID, selectedItem->itemCount);
-    } else {
-        mc->broadcastEntityEquipment(id, 0, false, 0, 0);
-    }
-
-    // broadcast held offhand item
-    if (selectedOffhand->present) {
-        mc->broadcastEntityEquipment(id, 1, true, selectedOffhand->itemID, selectedOffhand->itemCount);
-    } else {
-        mc->broadcastEntityEquipment(id, 1, false, 0, 0);
-    }
-
-    // tell this player about everyone else's equipment
-    for(auto& player : mc->players){
-        if(player.connected && player.id != id){
-            slot* playerSelectedItem = &player.inventory[selectedSlot]; // item in hand
-            slot* playerSelectedOffhand = &player.inventory[45]; // item in offhand
-            // broadcast held item
-            if (playerSelectedItem->present) writeEntityEquipment(player.id, 0, true, playerSelectedItem->itemID, playerSelectedItem->itemCount);
-
-            // broadcast held offhand item
-            if (playerSelectedOffhand->present) writeEntityEquipment(player.id, 1, true, playerSelectedOffhand->itemID, playerSelectedOffhand->itemCount);
-        }
-    }
+    updateEquipment();
     return true;
 }
 
