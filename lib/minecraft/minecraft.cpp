@@ -188,9 +188,7 @@ void minecraft::player::readInteractEntity(){
     targetPlayer->writeHealth();
     mc->broadcastEntityHealth(targetPlayer->health, targetPlayer->id);
     if (targetPlayer->health <= 0) {
-        mc->broadcastChatMessage(targetPlayer->username + " was slain by " + username, "Server");
-        mc->broadcastEntityStatus(3, targetPlayer->id); // play death sound and animation
-        mc->broadcastEntityPose(6, targetPlayer->id); // set death pose
+        targetPlayer->death(targetPlayer->username + " was slain by " + username);
     }
 
     packet p(targetPlayer->S, targetPlayer->mtx);
@@ -202,16 +200,10 @@ void minecraft::player::readInteractEntity(){
     p.writePacket();
 }
 
-void minecraft::player::readPosition(){
-    x = readDouble();
-    y = readDouble();
-    z = readDouble();
-    bool wasOnGround = on_ground;
-    on_ground = readBool();
-
-    if (health == 0) return; // if they are dead then don't do anything
-
-    if (wasOnGround != on_ground) {
+void minecraft::player::handleOnGround(bool onGround, double y) {
+    bool prevOnGround = on_ground;
+    on_ground = onGround;
+    if (prevOnGround != on_ground) {
         loginfo("Changed on_ground to " + String(on_ground));
         if (on_ground) {
             int16_t distanceFallen = floor(fallingHeight - y);
@@ -222,22 +214,31 @@ void minecraft::player::readPosition(){
                 writeHealth(); // send health data to client
                 mc->broadcastEntityHealth(health, id);
                 if (health <= 0) {
-                    mc->broadcastChatMessage(username + " fell from a high place", "Server");
-                    mc->broadcastEntityPose(6, id); // play death animation
-                    mc->broadcastEntityStatus(3, id); // play death sound and animation
+                    death(username + " fell from a high place");
                 }
             }
             fallingHeight = 0;
         }
     }
-    
+
     if (!on_ground && y > fallingHeight) fallingHeight = y;
+}
+
+void minecraft::player::readPosition(){
+    x = readDouble();
+    y = readDouble();
+    z = readDouble();
+
+    if (health == 0) return; // if they are dead then don't do anything
+
+    handleOnGround(readBool(), y);
 
     if (y < -100) {
         health = 0;
         food = 0;
         food_sat = 0;
         writeHealth();
+        death(username + " fell into the void");
     }
     mc->broadcastPlayerPosAndLook(x, y, z, yaw_i, pitch_i, on_ground, id);
     // login("player pos " + String(x) + " " + String(y) + " " + String(z));
@@ -248,7 +249,7 @@ void minecraft::player::readRotation(){
     pitch = readFloat();
     yaw_i = floor(fmap(yaw, 0, 360, 0, 256));
     pitch_i = floor(fmap(pitch, 0, 360, 0, 256));
-    on_ground = readBool();
+    handleOnGround(readBool(), y);
     mc->broadcastPlayerRotation(yaw_i, pitch_i, on_ground, id);
     // login("player rotation " + String(yaw) + " " + String(pitch));
 }
@@ -265,7 +266,7 @@ void minecraft::player::readPositionAndLook(){
     pitch = readFloat();
     yaw_i = floor(fmap(yaw, 0, 360, 0, 256));
     pitch_i = floor(fmap(pitch, 0, 360, 0, 256));
-    on_ground = readBool();
+    handleOnGround(readBool(), y);
     mc->broadcastPlayerPosAndLook(x, y, z, yaw_i, pitch_i, on_ground, id);
     // login("player rotation " + String(yaw) + " " + String(pitch));
 }
@@ -417,11 +418,11 @@ void minecraft::player::readBlockPlacement(){
         }
     }
 
-
     int8_t chunkBlockX = blockX % 16;
     int8_t chunkBlockZ = blockZ % 16;
 
     if (blockY >= 16) {
+        writeBlockChange(blockX, blockY, blockZ, 0x00);
         return;
     }
 
@@ -753,6 +754,9 @@ void minecraft::player::writeJoinGame(){
 void minecraft::player::writeRespawn() {
     mc->broadcastEntityDestroy(id);
     health = 20;
+    fallingHeight = 0;
+    food = 20;
+    food_sat = 5;
     mc->broadcastEntityHealth(health, id);
     mc->broadcastEntityPose(0, id);
     packet p(S, mtx);
@@ -769,7 +773,6 @@ void minecraft::player::writeRespawn() {
     writeSpawnPackets();
     mc->broadcastSpawnPlayer(id);
     updateEquipment();
-    
 }
 
 void minecraft::player::writeInventoryItems() {
@@ -926,16 +929,6 @@ void minecraft::player::writeEntityEquipment(uint8_t entityID, uint8_t slot, boo
         p.writeByte(0x00); // no nbt
     }
     p.writePacket();
-    Serial.print("Told player id ");
-    Serial.print(id);
-    Serial.print(" that entity ID ");
-    Serial.print(entityID);
-    Serial.print(" has ");
-    Serial.print(itemCount);
-    Serial.print(" of ");
-    Serial.print(itemID);
-    Serial.print(" in slot ");
-    Serial.println(slot);
 }
 
 void minecraft::player::writeInventorySlot(bool present, uint16_t slot, uint32_t itemID, uint8_t itemCount) {
@@ -956,8 +949,7 @@ void minecraft::player::writeInventorySlot(bool present, uint16_t slot, uint32_t
 void minecraft::player::writeBlockChange(int64_t x, int64_t y, int64_t z, uint16_t blockID) {
     packet p(S, mtx);
     p.writeVarInt(0x0B);
-    uint64_t pos = ((x & 0x3FFFFFF) << 38) | ((z & 0x3FFFFFF) << 12) | (y & 0xFFF);
-    p.writeLong(pos);
+    p.writePosition(x, y, z);
     p.writeVarInt(blockID);
     p.writePacket();
 }
@@ -1155,6 +1147,13 @@ void packet::writeUUID(int user_id){
     write(user_id);
 }
 
+void packet::writePosition(int64_t x, int64_t y, int64_t z) {
+    uint64_t pos = ((x & 0x3FFFFFF) << 38) | ((z & 0x3FFFFFF) << 12) | (y & 0xFFF);
+    for(int i=7; i>=0; i--){
+        write((uint8_t)((pos >> (i*8)) & 0xff));
+    }
+}
+
 void minecraft::player::writeLength(uint32_t length){
     do {
         uint8_t temp = (uint8_t)(length & 0b01111111);
@@ -1297,6 +1296,13 @@ void minecraft::player::handle(){
         }
     }
 }
+
+void minecraft::player::death(String message) {
+    mc->broadcastChatMessage(message, "Server");
+    mc->broadcastEntityPose(6, id); // play death animation
+    mc->broadcastEntityStatus(3, id); // play death sound and animation
+}
+
 // UTILITIES
 void minecraft::player::loginfo(String msg){
     Serial.println( "[INFO] p" + String(id) + " " + msg);

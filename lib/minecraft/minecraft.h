@@ -40,6 +40,7 @@ class packet{
     void writeByte          (int8_t num);
     void writeBoolean       (uint8_t val);
     void writeUUID          (int user_id);
+    void writePosition      (int64_t x, int64_t y, int64_t z);
 
     // write to client
     void serverWriteVarInt  (int32_t value);
@@ -84,12 +85,15 @@ class minecraft{
         bool join               ();
         void handle             ();
 
+        void death              (String message);
+
         uint8_t readHandShake   ();
         bool readLoginStart     ();
         uint64_t readPing       ();
         void readRequest        ();
 
         void readChat           ();
+        void handleOnGround     (bool onGround, double y);
         void readPosition       ();
         void readRotation       ();
         void readKeepAlive      ();
