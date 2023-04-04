@@ -107,6 +107,7 @@ class minecraft{
         void readClickWindow    ();
         void readInteractEntity ();
         void readBlockPlacement ();
+        void readUseItem        ();
 
         void writeResponse      ();
         void writeLoginSuccess  ();
@@ -167,6 +168,7 @@ class minecraft{
     uint64_t tick = 0;
     uint64_t prev_keepalive = 0;
     player players[5];
+    bool ledState = false;
 
     void handle                      ();
     void broadcastChunk              (int8_t chunkX, int8_t chunkZ, uint8_t excludedPlayerID);
@@ -182,6 +184,7 @@ class minecraft{
     void broadcastEntityDestroy      (uint8_t id);
     void broadcastEntityEquipment    (uint8_t id, uint8_t slot, bool present, uint16_t itemID, uint8_t itemCount);
     void broadcastBlockChange        (int64_t x, int64_t y, int64_t z, uint16_t blockID, uint8_t excludedPlayerID);
+    void toggleLED                   ();
     uint8_t getPlayerNum             ();
 };
 

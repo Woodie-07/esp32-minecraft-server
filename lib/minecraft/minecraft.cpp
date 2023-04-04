@@ -88,12 +88,8 @@ void minecraft::player::readChat(){
     if(m == "/stats"){
         writeChat("freeheap: " + String(esp_get_free_heap_size() / 1000) + "kB", "Server");
         heap_caps_print_heap_info(MALLOC_CAP_DEFAULT);
-    } else if (m == "/on") {
-        digitalWrite(26, HIGH);
-        mc->broadcastChatMessage("Turned LED on", "LED");
-    } else if (m == "/off") {
-        digitalWrite(26, LOW);
-        mc->broadcastChatMessage("Turned LED off", "LED");
+    } else if (m == "/toggle") {
+        mc->toggleLED();
     }
     else {
         mc->broadcastChatMessage(m, username);
@@ -229,9 +225,12 @@ void minecraft::player::readPosition(){
     y = readDouble();
     z = readDouble();
 
-    if (health == 0) return; // if they are dead then don't do anything
-
+    if (health == 0) {
+        readBool();
+        return; // if they are dead then don't do anything
+    }
     handleOnGround(readBool(), y);
+
 
     if (y < -100) {
         health = 0;
@@ -277,7 +276,7 @@ void minecraft::player::readTeleportConfirm(){
 }
 
 void minecraft::player::readHeldItem(){
-    selectedSlot = readUnsignedShort() + 36;
+    selectedSlot = readShort() + 36;
     slot* selectedItem = &inventory[selectedSlot];
 
     if (selectedItem->present) {
@@ -342,7 +341,7 @@ void minecraft::player::readAction(){
                 }
             }
             break;
-        case 2:
+        case 2: {
             chunk[chunkX][chunkZ][blockY][chunkBlockZ][chunkBlockArrayX] = 0x00;
             mc->broadcastBlockChange(blockX, blockY, blockZ, 0x00, id);
 
@@ -358,6 +357,17 @@ void minecraft::player::readAction(){
                 writeInventorySlot(true, slotToAddTo, itemID, newAmount);
             }
             break;
+        }
+        case 6: {
+            slot offhandItem = inventory[45];
+            slot mainhandItem = inventory[selectedSlot];
+            inventory[45] = mainhandItem;
+            inventory[selectedSlot] = offhandItem;
+            writeInventorySlot(mainhandItem.present, 45, mainhandItem.itemID, mainhandItem.itemCount);
+            writeInventorySlot(offhandItem.present, selectedSlot, offhandItem.itemID, offhandItem.itemCount);
+            updateEquipment();
+            break;
+        }
     }
 }
 
@@ -373,8 +383,8 @@ void minecraft::player::readEntityAction(){
             poseID = 0;
             break;
     }
-    mc->broadcastEntityPose(poseID, id);
     readVarInt(); // we don't need horse jump boost
+    mc->broadcastEntityPose(poseID, id);
 }
 
 void minecraft::player::readBlockPlacement(){
@@ -468,6 +478,11 @@ void minecraft::player::readBlockPlacement(){
     chunk[chunkX][chunkZ][blockY][chunkBlockZ][chunkBlockArrayX] = blockPlaced;
 
     mc->broadcastBlockChange(blockX, blockY, blockZ, blockPlaced, id);
+}
+
+void minecraft::player::readUseItem() {
+    readVarInt(); // hand used, we don't need to know
+    mc->toggleLED();
 }
 
 void minecraft::broadcastChunk(int8_t chunkX, int8_t chunkZ, uint8_t excludedPlayerID) {
@@ -614,6 +629,18 @@ uint8_t minecraft::getPlayerNum(){
         if(player.connected) i++;
     }
     return i;
+}
+
+void minecraft::toggleLED() {
+    if (ledState) {
+        ledState = false;
+        digitalWrite(26, LOW);
+        broadcastChatMessage("Turned LED off", "LED");
+    } else {
+        ledState = true;
+        digitalWrite(26, HIGH);
+        broadcastChatMessage("Turned LED on", "LED");
+    }
 }
 
 String sanitise(String s) {
@@ -815,18 +842,10 @@ void minecraft::player::updateEquipment() {
     slot* selectedOffhand = &inventory[45]; // item in offhand
 
     // broadcast held item
-    if (selectedItem->present) {
-        mc->broadcastEntityEquipment(id, 0, true, selectedItem->itemID, selectedItem->itemCount);
-    } else {
-        mc->broadcastEntityEquipment(id, 0, false, 0, 0);
-    }
+    mc->broadcastEntityEquipment(id, 0, selectedItem->present, selectedItem->itemID, selectedItem->itemCount);
 
     // broadcast held offhand item
-    if (selectedOffhand->present) {
-        mc->broadcastEntityEquipment(id, 1, true, selectedOffhand->itemID, selectedOffhand->itemCount);
-    } else {
-        mc->broadcastEntityEquipment(id, 1, false, 0, 0);
-    }
+    mc->broadcastEntityEquipment(id, 1, selectedOffhand->present, selectedOffhand->itemID, selectedOffhand->itemCount);
 
     // tell this player about everyone else's equipment
     for(auto& player : mc->players){
@@ -1312,6 +1331,9 @@ void minecraft::player::handle(){
             break;
         case 0x2E:
             readBlockPlacement();
+            break;
+        case 0x2F:
+            readUseItem();
             break;
         default:
             loginfo("id: 0x" + String(packetid, HEX) + " length: " + String(length));
