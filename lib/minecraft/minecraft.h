@@ -130,6 +130,7 @@ class minecraft{
         void writeEntityEquipment(uint8_t id, uint8_t slot, bool present, uint16_t itemID, uint8_t itemCount);
         void writeInventorySlot (bool present, uint16_t slot, uint32_t itemID, uint8_t itemCount);
         void writeBlockChange   (int64_t x, int64_t y, int64_t z, uint16_t blockID);
+        void writeBlockBreakAnimation(uint8_t id, int64_t x, int64_t y, int64_t z, uint8_t stage);
         void writeHealth        ();
         void writeSpawnPackets  ();
         void writeRespawn       ();

@@ -309,36 +309,55 @@ void minecraft::player::readAction(){
 
     if (blockY > 16) return;
 
-    if (status == 2) {
-        int8_t chunkX = blockX / 16;
-        int8_t chunkZ = blockZ / 16;
+    int8_t chunkX = blockX / 16;
+    int8_t chunkZ = blockZ / 16;
 
-        if (chunkX > 1 || chunkZ > 1 || chunkX < 0 || chunkZ < 0) {
-            return;
-        }
-        int8_t chunkBlockX = blockX % 16;
-        int8_t chunkBlockZ = blockZ % 16;
-        int8_t chunkBlockArrayX;
-        if (chunkBlockX < 8) {
-            chunkBlockArrayX = 7 - chunkBlockX;
-        } else {
-            chunkBlockArrayX = 15 - (chunkBlockX - 8);
-        }
-        u_int8_t blockBroken = chunk[chunkX][chunkZ][blockY][chunkBlockZ][chunkBlockArrayX];
-        chunk[chunkX][chunkZ][blockY][chunkBlockZ][chunkBlockArrayX] = 0x00;
-        mc->broadcastBlockChange(blockX, blockY, blockZ, 0x00, id);
+    if (chunkX > 1 || chunkZ > 1 || chunkX < 0 || chunkZ < 0) {
+        return;
+    }
+    int8_t chunkBlockX = blockX % 16;
+    int8_t chunkBlockZ = blockZ % 16;
+    int8_t chunkBlockArrayX;
+    if (chunkBlockX < 8) {
+        chunkBlockArrayX = 7 - chunkBlockX;
+    } else {
+        chunkBlockArrayX = 15 - (chunkBlockX - 8);
+    }
+    u_int8_t blockAction = chunk[chunkX][chunkZ][blockY][chunkBlockZ][chunkBlockArrayX];
 
-        uint16_t itemID = blockToItem(blockBroken);
-        uint8_t slotToAddTo = findFreeInvSlot(itemID);
-        loginfo("Adding to slot " + String(slotToAddTo));
-        if (slotToAddTo != 0 && itemID != 0) {
-            uint8_t currentAmount;
-            if (!inventory[slotToAddTo].present) currentAmount = 0;
-            else currentAmount = inventory[slotToAddTo].itemCount;
-            uint8_t newAmount = currentAmount + 1;
-            inventory[slotToAddTo] = {true, itemID, newAmount};
-            writeInventorySlot(true, slotToAddTo, itemID, newAmount);
-        }
+    switch (status) {
+        case 0:
+            for(auto& player : mc->players){
+                if(player.connected && player.id != id){
+                    // meh just show animation stage 9
+                    // i'm not going to calculate how long the block will take to break and send each stage of the animation
+                    player.writeBlockBreakAnimation(id, blockX, blockY, blockZ, 9);
+                }
+            }
+            break;
+        case 1:
+            for(auto& player : mc->players){
+                if(player.connected && player.id != id){
+                    player.writeBlockBreakAnimation(id, blockX, blockY, blockZ, 10); // any number that is not 0-9 will stop the animation
+                }
+            }
+            break;
+        case 2:
+            chunk[chunkX][chunkZ][blockY][chunkBlockZ][chunkBlockArrayX] = 0x00;
+            mc->broadcastBlockChange(blockX, blockY, blockZ, 0x00, id);
+
+            uint16_t itemID = blockToItem(blockAction);
+            uint8_t slotToAddTo = findFreeInvSlot(itemID);
+            loginfo("Adding to slot " + String(slotToAddTo));
+            if (slotToAddTo != 0 && itemID != 0) {
+                uint8_t currentAmount;
+                if (!inventory[slotToAddTo].present) currentAmount = 0;
+                else currentAmount = inventory[slotToAddTo].itemCount;
+                uint8_t newAmount = currentAmount + 1;
+                inventory[slotToAddTo] = {true, itemID, newAmount};
+                writeInventorySlot(true, slotToAddTo, itemID, newAmount);
+            }
+            break;
     }
 }
 
@@ -951,6 +970,15 @@ void minecraft::player::writeBlockChange(int64_t x, int64_t y, int64_t z, uint16
     p.writeVarInt(0x0B);
     p.writePosition(x, y, z);
     p.writeVarInt(blockID);
+    p.writePacket();
+}
+
+void minecraft::player::writeBlockBreakAnimation(uint8_t id, int64_t x, int64_t y, int64_t z, uint8_t stage) {
+    packet p(S, mtx);
+    p.writeVarInt(0x08);
+    p.writeVarInt(id);
+    p.writePosition(x, y, z);
+    p.writeByte(stage);
     p.writePacket();
 }
 
