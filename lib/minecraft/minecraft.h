@@ -68,7 +68,7 @@ class minecraft{
         int yaw_i = 0;
         int pitch_i = 0;
         bool on_ground = true;
-        uint8_t onGroundY = 0;
+        double fallingHeight = 0;
         float health = 20;
         uint8_t food = 20;
         float food_sat = 5;

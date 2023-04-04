@@ -214,7 +214,7 @@ void minecraft::player::readPosition(){
     if (wasOnGround != on_ground) {
         loginfo("Changed on_ground to " + String(on_ground));
         if (on_ground) {
-            int16_t distanceFallen = onGroundY - y;
+            int16_t distanceFallen = floor(fallingHeight - y);
             loginfo("Distance fallen: " + String(distanceFallen));
             if (distanceFallen > 3) {
                 health -= distanceFallen - 3; // reduce health by the distance fallen
@@ -227,10 +227,11 @@ void minecraft::player::readPosition(){
                     mc->broadcastEntityStatus(3, id); // play death sound and animation
                 }
             }
+            fallingHeight = 0;
         }
     }
     
-    if (on_ground) onGroundY = y;
+    if (!on_ground && y > fallingHeight) fallingHeight = y;
 
     if (y < -100) {
         health = 0;
