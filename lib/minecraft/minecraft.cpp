@@ -182,9 +182,16 @@ void minecraft::player::readInteractEntity(){
         return;
     }
 
-    mc->broadcastEntityAnimation(1, entityID); // do damage tick animation
+    mc->broadcastEntityAnimation(1, targetPlayer->id, true); // take damage animation
+    mc->broadcastEntityStatus(2, id, true); // play hurt sound
     targetPlayer->health -= 1;
     targetPlayer->writeHealth();
+    mc->broadcastEntityHealth(targetPlayer->health, targetPlayer->id);
+    if (targetPlayer->health <= 0) {
+        mc->broadcastChatMessage(targetPlayer->username + " was slain by " + username, "Server");
+        mc->broadcastEntityStatus(3, targetPlayer->id); // play death sound and animation
+        mc->broadcastEntityPose(6, targetPlayer->id); // set death pose
+    }
 
     packet p(targetPlayer->S, targetPlayer->mtx);
     p.writeVarInt(0x46);
@@ -211,8 +218,14 @@ void minecraft::player::readPosition(){
             loginfo("Distance fallen: " + String(distanceFallen));
             if (distanceFallen > 3) {
                 health -= distanceFallen - 3; // reduce health by the distance fallen
-                mc->broadcastEntityAnimation(1, id);  // do damage tick animation
+                mc->broadcastEntityStatus(2, id, true); // play hurt sound
                 writeHealth(); // send health data to client
+                mc->broadcastEntityHealth(health, id);
+                if (health <= 0) {
+                    mc->broadcastChatMessage(username + " fell from a high place", "Server");
+                    mc->broadcastEntityPose(6, id); // play death animation
+                    mc->broadcastEntityStatus(3, id); // play death sound and animation
+                }
             }
         }
     }
@@ -322,7 +335,17 @@ void minecraft::player::readAction(){
 
 void minecraft::player::readEntityAction(){
     readVarInt(); // we don't need our own id lmao
-    mc->broadcastEntityAction(readVarInt(), id);
+    uint8_t actionID = readVarInt();
+    uint8_t poseID;
+    switch (actionID) {
+        case 0:
+            poseID = 5;
+            break;
+        case 1:
+            poseID = 0;
+            break;
+    }
+    mc->broadcastEntityPose(poseID, id);
     readVarInt(); // we don't need horse jump boost
 }
 
@@ -437,15 +460,15 @@ void minecraft::broadcastChatMessage(String msg, String username){
     }
 }
 
-void minecraft::broadcastSpawnPlayer(){
+void minecraft::broadcastSpawnPlayer(uint8_t id){
+    player* p = &players[id];
     for(auto& player : players){
-        if(player.connected){
-            for(const auto& p : players){
-                if(p.id != player.id && p.connected){
-                    player.writeSpawnPlayer(p.x, p.y, p.z, p.yaw_i, p.pitch_i, p.id);
-                    player.writeEntityLook(p.yaw_i, p.id);
-                }
-            }
+        if(player.connected && player.id != id){
+            player.writeSpawnPlayer(p->x, p->y, p->z, p->yaw_i, p->pitch_i, p->id);
+            player.writeEntityLook(p->yaw_i, p->id);
+            
+            p->writeSpawnPlayer(player.x, player.y, player.z, player.yaw_i, player.pitch_i, player.id);
+            p->writeEntityLook(player.yaw_i, player.id);
         }
     }
 }
@@ -476,10 +499,34 @@ void minecraft::broadcastEntityAnimation(uint8_t anim, uint8_t id, bool sendToSe
     }
 }
 
-void minecraft::broadcastEntityAction(uint8_t action, uint8_t id){
+void minecraft::broadcastEntityStatus(uint8_t status, uint8_t id, bool sendToSelf){
+    for(auto& player : players){
+        if(player.connected && (player.id != id || sendToSelf)){
+            player.writeEntityStatus(status, id);
+            Serial.print("sent entity status ");
+            Serial.print(status);
+            Serial.print(" for id ");
+            Serial.print(id);
+            Serial.print(" to player ");
+            Serial.print(player.username);
+            Serial.print(" with id ");
+            Serial.println(player.id);
+        }
+    }
+}
+
+void minecraft::broadcastEntityPose(uint8_t pose, uint8_t id){
     for(auto& player : players){
         if(player.connected && player.id != id){
-            player.writeEntityAction(action, id);
+            player.writeEntityPose(pose, id);
+        }
+    }
+}
+
+void minecraft::broadcastEntityHealth(float health, uint8_t id){
+    for(auto& player : players){
+        if(player.connected && player.id != id){
+            player.writeEntityHealth(health, id);
         }
     }
 }
@@ -681,7 +728,10 @@ void minecraft::player::writeJoinGame(){
 }
 
 void minecraft::player::writeRespawn() {
+    mc->broadcastEntityDestroy(id);
     health = 20;
+    mc->broadcastEntityHealth(health, id);
+    mc->broadcastEntityPose(0, id);
     packet p(S, mtx);
     p.writeVarInt(0x39);
     p.write(dimension_NBT, sizeof(dimension_NBT) / sizeof(dimension_NBT[0])); // NBT with world settings
@@ -694,6 +744,7 @@ void minecraft::player::writeRespawn() {
     p.writeBoolean(0); // do not copy met
     p.writePacket();
     writeSpawnPackets();
+    mc->broadcastSpawnPlayer(id);
 }
 
 void minecraft::player::writeInventoryItems() {
@@ -768,23 +819,33 @@ void minecraft::player::writeEntityAnimation(uint8_t anim, uint8_t id){
     p.writePacket();
 }
 
-void minecraft::player::writeEntityAction(uint8_t action, uint8_t id){
+void minecraft::player::writeEntityStatus(uint8_t status, uint8_t id){
+    packet p(S, mtx);
+    p.writeVarInt(0x1A); // packet id
+    p.writeInt(id);
+    p.writeByte(status);
+    p.writePacket();
+}
+
+void minecraft::player::writeEntityPose(uint8_t pose, uint8_t id){
     packet p(S, mtx);
     p.writeVarInt(0x44); // packet id
     p.writeVarInt(id);
-    switch(action){
-        case 0:
-            p.writeUnsignedByte(6); // field unique id
-            p.writeVarInt(18); // we need only poses since swimming etc. isn't supported
-            p.writeVarInt(5); // sneak
-            break;
-        case 1:
-            p.writeUnsignedByte(6); // field unique id
-            p.writeVarInt(18); // we need only poses since swimming etc. isn't supported
-            p.writeVarInt(0); // stand
-            break;
-    }
+    p.writeUnsignedByte(6); // field unique id
+    p.writeVarInt(18); // we need only poses since swimming etc. isn't supported
+    p.writeVarInt(pose);
     p.writeUnsignedByte(0xFF); // terminate entity metadata array
+    p.writePacket();
+}
+
+void minecraft::player::writeEntityHealth(float health, uint8_t entityID) {
+    packet p(S, mtx);
+    p.writeVarInt(0x44); 
+    p.writeVarInt(entityID);
+    p.writeUnsignedByte(8); 
+    p.writeVarInt(2);
+    p.writeFloat(health);
+    p.writeUnsignedByte(0xFF);
     p.writePacket();
 }
 
@@ -1040,6 +1101,10 @@ void minecraft::player::writeSpawnPackets() {
     }
     if (spawnY == 0) spawnY = 16;
 
+    x = spawnX;
+    y = spawnY;
+    z = spawnZ;
+
     writePlayerPositionAndLook(spawnX, spawnY, spawnZ, 0, 0, 0x00);
     writeServerDifficulty();
     for (uint8_t i = 0; i < 2; i++) {
@@ -1048,6 +1113,7 @@ void minecraft::player::writeSpawnPackets() {
         }
     }
     writeInventoryItems();
+    
 }
 
 // HANDLERS
@@ -1069,7 +1135,7 @@ bool minecraft::player::join(){
     writeSpawnPackets();
     mc->broadcastPlayerInfo();
     mc->broadcastChatMessage(username + " joined the server", "Server");
-    mc->broadcastSpawnPlayer();
+    mc->broadcastSpawnPlayer(id);
     return true;
 }
 
