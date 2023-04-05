@@ -75,6 +75,7 @@ class minecraft{
         float food_sat = 5;
         uint8_t id = 0;
         uint8_t selectedSlot = 36;
+        slot currentSelectedItem = {false}; // used when dragging thing around in the inventory
         slot inventory[46] = {{false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {false}, {true, 0x45, 64}, {true, 0x01, 32}, {true, 0x01, 64}, {true, 0x02, 64}};
         
 

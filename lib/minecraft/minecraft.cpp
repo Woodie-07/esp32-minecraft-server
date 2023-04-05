@@ -105,17 +105,29 @@ void minecraft::player::readClientStatus(){
     }
 }
 
+void printItemInfo(slot* theItem, String header) {
+    Serial.println("---------- " + header + " ----------");
+    Serial.print("Present: ");
+    Serial.println(theItem->present);
+    if (theItem->present) {
+        Serial.print("Item ID: ");
+        Serial.println(theItem->itemID);
+        Serial.print("Item count: ");
+        Serial.println(theItem->itemCount);
+    }
+}
+
 void minecraft::player::readClickWindow(){
     loginfo("Click window packet received");
 
     int8_t windowID = readByte();
-    int16_t slot = readShort();
+    int16_t slotID = readShort();
     uint8_t button = readByte();
     int16_t action = readShort();
     int32_t mode = readVarInt();
     bool present = readBool();
     loginfo("Window ID: " + String(windowID));
-    loginfo("Slot: " + String(slot));
+    loginfo("Slot: " + String(slotID));
     loginfo("Button: " + String(button));
     loginfo("Action: " + String(action));
     loginfo("Mode: " + String(mode));
@@ -134,6 +146,78 @@ void minecraft::player::readClickWindow(){
         loginfo("Item Count: " + String(itemCount));
     }
 
+    switch (mode) {
+        case 0: {
+            switch (button) {
+                case 0: {
+                    if (slotID == -999) {
+                        currentSelectedItem = {false}; // i'm not gonna actually drop the item as there is no support for item entities, instead just discard it
+                        return;
+                    }
+                    slot inventorySlot = inventory[slotID];
+                    slot selectedItemSlot = currentSelectedItem;
+
+                    if (inventorySlot.itemID == selectedItemSlot.itemID && inventorySlot.present && selectedItemSlot.present) {
+                        inventorySlot.itemCount += selectedItemSlot.itemCount;
+                        if (inventorySlot.itemCount > 64) {
+                            selectedItemSlot.itemCount = inventorySlot.itemCount % 64;
+                            inventorySlot.itemCount = 64;
+                        } else {
+                            selectedItemSlot = {false};
+                        }
+                    } else {
+                        // swap them
+                        inventory[slotID] = selectedItemSlot;
+                        currentSelectedItem = inventorySlot;
+                    }
+                    break;
+                }
+                case 1: {
+                    if (slotID == -999) {
+                        currentSelectedItem.itemCount -= 1;
+                        if (currentSelectedItem.itemCount == 0) {
+                            currentSelectedItem.present = false;
+                        }
+                        return;
+                    }
+
+                    slot* slotItem = &inventory[slotID];
+                    if (!currentSelectedItem.present) {
+                        uint8_t slotItemCount = slotItem->itemCount;
+                        uint8_t newSlotItemCount = slotItemCount >> 1;
+                        uint8_t newSelectedItemCount = slotItemCount - newSlotItemCount;
+
+                        currentSelectedItem.present = true;
+                        currentSelectedItem.itemCount = newSelectedItemCount;
+                        currentSelectedItem.itemID = slotItem->itemID;
+
+                        slotItem->itemCount = newSlotItemCount;
+                        if (newSlotItemCount == 0) {
+                            slotItem->present = false;
+                        }
+                    } else {
+                        currentSelectedItem.itemCount -= 1;
+                        if (currentSelectedItem.itemCount == 0) {
+                            currentSelectedItem.present = false;
+                        }
+
+                        slotItem->itemCount += 1;
+                        if (!slotItem->present) {
+                            slotItem->present = true;
+                            slotItem->itemID = currentSelectedItem.itemID;
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    slot* theSlot = &currentSelectedItem;
+    printItemInfo(theSlot, "Current Selected Item");
+
+    theSlot = &inventory[slotID];
+    printItemInfo(theSlot, "Inventory Slot");
 }
 
 void minecraft::player::readInteractEntity(){
@@ -545,14 +629,6 @@ void minecraft::broadcastEntityStatus(uint8_t status, uint8_t id, bool sendToSel
     for(auto& player : players){
         if(player.connected && (player.id != id || sendToSelf)){
             player.writeEntityStatus(status, id);
-            Serial.print("sent entity status ");
-            Serial.print(status);
-            Serial.print(" for id ");
-            Serial.print(id);
-            Serial.print(" to player ");
-            Serial.print(player.username);
-            Serial.print(" with id ");
-            Serial.println(player.id);
         }
     }
 }
