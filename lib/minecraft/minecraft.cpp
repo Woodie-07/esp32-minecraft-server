@@ -152,7 +152,7 @@ void minecraft::player::readClickWindow(){
                 case 0: {
                     if (slotID == -999) {
                         currentSelectedItem = {false}; // i'm not gonna actually drop the item as there is no support for item entities, instead just discard it
-                        return;
+                        break;
                     }
                     slot inventorySlot = inventory[slotID];
                     slot selectedItemSlot = currentSelectedItem;
@@ -178,7 +178,7 @@ void minecraft::player::readClickWindow(){
                         if (currentSelectedItem.itemCount == 0) {
                             currentSelectedItem.present = false;
                         }
-                        return;
+                        break;
                     }
 
                     slot* slotItem = &inventory[slotID];
@@ -196,6 +196,7 @@ void minecraft::player::readClickWindow(){
                             slotItem->present = false;
                         }
                     } else {
+                        if (slotItem->itemCount == 64) break;
                         currentSelectedItem.itemCount -= 1;
                         if (currentSelectedItem.itemCount == 0) {
                             currentSelectedItem.present = false;
@@ -210,6 +211,69 @@ void minecraft::player::readClickWindow(){
                     break;
                 }
             }
+            break;
+        }
+        case 1: {
+            slot* slotItem = &inventory[slotID];
+
+            uint8_t slotRangeStart;
+            uint8_t slotRangeEnd;
+            if (slotID < 36 && slotID > 8) {
+                // put in hotbar
+                slotRangeStart = 36;
+                slotRangeEnd = 44;
+            } else {
+                // put in inventory
+                slotRangeStart = 9;
+                slotRangeEnd = 35;
+            }
+
+            for (uint8_t i = slotRangeStart; i <= slotRangeEnd; i++) { // check if we have the item in the acceptable slots already. if so, put it in there
+                slot* currentItem = &inventory[i];
+                if (currentItem->present && currentItem->itemID == slotItem->itemID) {
+                    uint8_t itemAcceptCount = 64 - currentItem->itemCount;
+
+                    if (itemAcceptCount > slotItem->itemCount) itemAcceptCount = slotItem->itemCount;
+
+                    slotItem->itemCount -= itemAcceptCount;
+                    currentItem ->itemCount += itemAcceptCount;
+
+                    if (slotItem->itemCount == 0) {
+                        slotItem->present = false;
+                        break;
+                    }
+                }
+            }
+            if (slotItem->itemCount == 0) break;
+
+            for (uint8_t i = slotRangeStart; i <= slotRangeEnd; i++) { // check if we have the item in the acceptable slots already. if so, put it in there
+                slot* currentItem = &inventory[i];
+                if (!currentItem->present) {
+                    currentItem->present = true;
+                    currentItem->itemCount = slotItem->itemCount;
+                    currentItem->itemID = slotItem->itemID;
+
+                    slotItem->itemCount = 0;
+                    slotItem->present = false;
+                    break;
+                }
+            }
+            break;
+        }
+        case 2: {
+            slot hoveringSlot = inventory[slotID];
+            slot swapSlot = inventory[36 + button];
+
+            // swap them
+            inventory[36 + button] = hoveringSlot;
+            inventory[slotID] = swapSlot;
+            break;
+        }
+        case 4: {
+            slot* hoveringSlot = &inventory[slotID];
+            hoveringSlot->itemCount -= 1;
+            if (hoveringSlot->itemCount == 0) hoveringSlot->present = false;
+            break;
         }
     }
 
@@ -218,6 +282,8 @@ void minecraft::player::readClickWindow(){
 
     theSlot = &inventory[slotID];
     printItemInfo(theSlot, "Inventory Slot");
+
+    writeInventoryItems();
 }
 
 void minecraft::player::readInteractEntity(){
@@ -1449,15 +1515,11 @@ void minecraft::player::logout(String msg){
 uint8_t minecraft::player::findFreeInvSlot(uint16_t itemID){
     uint8_t bestCandidate = 0;
     uint8_t bestCandidateType = 0;
-    String s = " slot ";
     for (uint8_t i = 36; i < 46; i++){
-        loginfo("Checking" + s + String(i));
         uint8_t slotFree = isSlotFree(i, itemID);
         if (slotFree == 2 && bestCandidateType != 2){
-            loginfo("Found perfect" + s + String(i));
             return i;
         } else if (slotFree == 1 && bestCandidateType == 0){
-            loginfo("Found free" + s + String(i));
             bestCandidate = i;
             bestCandidateType = 1;
         }
